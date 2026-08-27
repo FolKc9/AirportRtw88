@@ -1,0 +1,14 @@
+build/
+build-airport/
+build-airport-legacy/
+.DS_Store
+*.o
+*.a
+firmware/*.bin
+rtw88.kext/Contents/Resources/*.bin
+rtw88.kext/Contents/MacOS/
+src/compat/fw_blobs.c
+*.log
+*.plist.backup
+EFI/
+diagnostics/

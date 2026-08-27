@@ -1,0 +1,51 @@
+diff --git a/drivers/net/wireless/realtek/rtw88/main.c b/drivers/net/wireless/realtek/rtw88/main.c
+--- a/drivers/net/wireless/realtek/rtw88/main.c
++++ b/drivers/net/wireless/realtek/rtw88/main.c
+@@ -229,9 +229,14 @@ static void rtw_watch_dog_work(struct work_struct *work)
+ 	ieee80211_queue_delayed_work(rtwdev->hw, &rtwdev->watch_dog_work,
+ 				     RTW_WATCH_DOG_DELAY_TIME);
+ 
+-	/* Diagnostic: skip all RF-dynamic work + coex queries. */
+-	if (rtw88_disable_watchdog_work)
++	/* macOS: keep the potentially troublesome full RF-dynamic path disabled,
++	 * but retain the one piece firmware rate adaptation needs: fresh RSSI for
++	 * the associated STA.  This deliberately avoids DIG/DPK/power tracking. */
++	if (rtw88_disable_watchdog_work) {
++		rtw_phy_macos_rssi_feed(rtwdev);
++		rtwdev->watch_dog_cnt++;
+ 		goto unlock;
++	}
+ 
+ 	if (rtwdev->stats.tx_cnt > 100 || rtwdev->stats.rx_cnt > 100)
+ 		set_bit(RTW_FLAG_BUSY_TRAFFIC, rtwdev->flags);
+diff --git a/drivers/net/wireless/realtek/rtw88/phy.c b/drivers/net/wireless/realtek/rtw88/phy.c
+--- a/drivers/net/wireless/realtek/rtw88/phy.c
++++ b/drivers/net/wireless/realtek/rtw88/phy.c
+@@ -319,6 +319,14 @@ static void rtw_phy_stat_rssi(struct rtw_dev *rtwdev)
+ 	dm_info->pre_min_rssi = dm_info->min_rssi;
+ 	dm_info->min_rssi = data.min_rssi;
+ }
++
++/* Feixiao/macOS minimal watchdog path: feed the firmware's rate-adaptation
++ * logic with per-station RSSI while leaving the rest of the dynamic PHY
++ * mechanism disabled.  The macOS port previously skipped this together with
++ * DIG/DPK/power tracking, which leaves firmware RA without RSSI updates. */
++void rtw_phy_macos_rssi_feed(struct rtw_dev *rtwdev)
++{
++	rtw_phy_stat_rssi(rtwdev);
++}
+ 
+ static void rtw_phy_stat_rate_cnt(struct rtw_dev *rtwdev)
+ {
+ 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+diff --git a/drivers/net/wireless/realtek/rtw88/phy.h b/drivers/net/wireless/realtek/rtw88/phy.h
+--- a/drivers/net/wireless/realtek/rtw88/phy.h
++++ b/drivers/net/wireless/realtek/rtw88/phy.h
+@@ -19,6 +19,7 @@ extern const u8 * const rtw_rate_section[];
+ extern const u8 rtw_rate_size[];
+ void rtw_phy_init(struct rtw_dev *rtwdev);
+ void rtw_phy_dynamic_mechanism(struct rtw_dev *rtwdev);
++void rtw_phy_macos_rssi_feed(struct rtw_dev *rtwdev);
+ u8 rtw_phy_rf_power_2_rssi(s8 *rf_power, u8 path_num);
+ u32 rtw_phy_read_rf(struct rtw_dev *rtwdev, enum rtw_rf_path rf_path,
+ 		    u32 addr, u32 mask);

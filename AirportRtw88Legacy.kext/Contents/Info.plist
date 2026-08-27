@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>AirportRtw88Legacy</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.rtw88.airport.legacy</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>AirportRtw88Legacy</string>
+    <key>CFBundlePackageType</key>
+    <string>KEXT</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.4.10</string>
+    <key>CFBundleVersion</key>
+    <string>1.4.10</string>
+    <key>IOKitPersonalities</key>
+    <dict>
+        <key>RTL8821CE Native Wi-Fi</key>
+        <dict>
+            <key>CFBundleIdentifier</key>
+            <string>com.rtw88.airport.legacy</string>
+            <key>IOClass</key>
+            <string>RTW88PCIDevice</string>
+            <key>IOMatchCategory</key>
+            <string>WiFiDriver</string>
+            <key>IONetworkRootType</key>
+            <string>airport</string>
+            <key>IOPCIMatch</key>
+            <string>0xC82110EC</string>
+            <key>IOProbeScore</key>
+            <integer>70000</integer>
+            <key>IOProviderClass</key>
+            <string>IOPCIDevice</string>
+            <key>IOResourceMatch</key>
+            <string>IOBSD</string>
+            <key>RTW88ChipName</key>
+            <string>rtw8821c</string>
+            <key>RTW88FWName</key>
+            <string>rtw8821c_fw.bin</string>
+        </dict>
+    </dict>
+    <key>NSHumanReadableCopyright</key>
+    <string>Experimental native IO80211FamilyLegacy bridge for rtw88-macos</string>
+    <key>OSBundleCompatibleVersion</key>
+	<string>1.2.8</string>
+    <key>OSBundleLibraries</key>
+    <dict>
+        <key>com.apple.driver.corecapture</key>
+        <string>1.0.0</string>
+        <key>com.apple.iokit.IO80211FamilyLegacy</key>
+        <string>1200.12.2b1</string>
+        <key>com.apple.iokit.IONetworkingFamily</key>
+        <string>3.2</string>
+        <key>com.apple.iokit.IOPCIFamily</key>
+        <string>2.9</string>
+        <key>com.apple.kpi.bsd</key>
+        <string>20.0.0</string>
+        <key>com.apple.kpi.iokit</key>
+        <string>20.0.0</string>
+        <key>com.apple.kpi.libkern</key>
+        <string>20.0.0</string>
+        <key>com.apple.kpi.mach</key>
+        <string>20.0.0</string>
+        <key>com.apple.kpi.unsupported</key>
+        <string>20.0.0</string>
+    </dict>
+    <key>OSBundleRequired</key>
+    <string>Network-Root</string>
+    <key>RTW88BuildFlavor</key>
+	<string>NativeLegacy-IO80211-exp40-vht-qos-blockack-autojoin-rx-workloop-owned</string>
+</dict>
+</plist>

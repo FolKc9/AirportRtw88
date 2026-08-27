@@ -1,0 +1,36 @@
+diff --git a/drivers/net/wireless/realtek/rtw88/pci.c b/drivers/net/wireless/realtek/rtw88/pci.c
+--- a/drivers/net/wireless/realtek/rtw88/pci.c
++++ b/drivers/net/wireless/realtek/rtw88/pci.c
+@@ -1059,8 +1059,15 @@ static u32 rtw_pci_rx_napi(struct rtw_dev *rtwdev, struct rtw_pci *rtwpci,
+ 		rtw_pci_dma_check(rtwdev, ring, cur_rp);
+ 		skb = ring->buf[cur_rp];
+ 		dma = *((dma_addr_t *)skb->cb);
++#ifdef RTW88_MACOS
++		/* macOS uses a software bounce buffer. Copy only the RX descriptor
++		 * first so pkt_len can be decoded; copying the full 11K buffer for
++		 * every descriptor was the dominant downlink CPU/memory cost. */
++		dma_sync_single_for_cpu(rtwdev->dev, dma, pkt_desc_sz, DMA_FROM_DEVICE);
++#else
+ 		dma_sync_single_for_cpu(rtwdev->dev, dma, RTK_PCI_RX_BUF_SIZE,
+ 					DMA_FROM_DEVICE);
++#endif
+ 		rx_desc = skb->data;
+ 		rtw_rx_query_rx_desc(rtwdev, rx_desc, &pkt_stat, &rx_status);
+ 
+@@ -1071,6 +1078,16 @@ static u32 rtw_pci_rx_napi(struct rtw_dev *rtwdev, struct rtw_pci *rtwpci,
+ 		 * discard the frame if none available
+ 		 */
+ 		new_len = pkt_stat.pkt_len + pkt_offset;
++		if (unlikely(new_len > RTK_PCI_RX_BUF_SIZE))
++			goto next_rp;
++#ifdef RTW88_MACOS
++		/* Now that the descriptor told us the real frame length, copy only
++		 * bytes the driver will actually consume instead of all 11478 bytes.
++		 * The descriptor is copied twice, intentionally: it keeps the DMA shim
++		 * simple and the second copy is tiny relative to the old full-buffer
++		 * bounce copy. */
++		dma_sync_single_for_cpu(rtwdev->dev, dma, new_len, DMA_FROM_DEVICE);
++#endif
+ 		new = dev_alloc_skb(new_len);
+ 		if (WARN_ONCE(!new, "rx routine starvation\n"))
+ 			goto next_rp;

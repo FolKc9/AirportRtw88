@@ -1,0 +1,52 @@
+name: Build AirportRtw88Legacy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout AirportRtw88
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: AirportRtw88
+
+      - name: Clone rtw88-stable
+        run: git clone --depth 1 https://github.com/thegwchr/rtw88-stable.git
+
+      - name: Download firmware blobs
+        run: |
+          cd AirportRtw88/firmware
+          for fw in rtw8821c_fw.bin; do
+            if [ ! -s "$fw" ]; then
+              curl -sLO "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/rtw88/$fw"
+            fi
+          done
+          ls -lh *.bin
+
+      - name: Build native legacy kext
+        run: make FLAVOR=airport-legacy kext
+        working-directory: AirportRtw88
+
+      - name: Get git hash and kext UUID
+        id: ids
+        run: |
+          echo "hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "uuid=$(dwarfdump --uuid AirportRtw88/build-airport-legacy/out/AirportRtw88Legacy.kext/Contents/MacOS/AirportRtw88Legacy | awk '{print $2}')" >> $GITHUB_OUTPUT
+
+      - name: Create artifact zip
+        run: |
+          cd AirportRtw88/build-airport-legacy/out
+          zip -r "${{ runner.temp }}/AirportRtw88Legacy_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip" AirportRtw88Legacy.kext
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirportRtw88Legacy_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}
+          path: ${{ runner.temp }}/AirportRtw88Legacy_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip
