@@ -18,7 +18,12 @@ jobs:
           path: AirportRtw88
 
       - name: Clone rtw88-stable
-        run: git clone --depth 1 https://github.com/thegwchr/rtw88-stable.git
+        run: |
+          git clone --branch feixiao https://github.com/thegwchr/rtw88-stable.git
+          git -C rtw88-stable checkout d029a677c49266fad86750714eb5612becd134d3
+
+      - name: Apply the exp40 macOS port patches
+        run: git -C rtw88-stable apply --check ../AirportRtw88/patches/rtw88-exp40-macos-port.patch && git -C rtw88-stable apply ../AirportRtw88/patches/rtw88-exp40-macos-port.patch
 
       - name: Download firmware blobs
         run: |
@@ -29,6 +34,18 @@ jobs:
             fi
           done
           ls -lh *.bin
+
+      - name: Build MacKernelSDK runtime libraries
+        working-directory: AirportRtw88
+        run: |
+          mkdir -p MacKernelSDK/Library/x86_64 MacKernelSDK/Library/universal build-macksdk
+          common_flags=(-mkernel -arch x86_64 -mmacosx-version-min=11.0 -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -I MacKernelSDK/Headers -DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE -DAPPLE -DNeXT -DTARGET_OS_OSX)
+          xcrun clang "${common_flags[@]}" -c MacKernelSDK/Library/kmod/c_start.c -o build-macksdk/c_start.o
+          xcrun clang "${common_flags[@]}" -c MacKernelSDK/Library/kmod/c_stop.c -o build-macksdk/c_stop.o
+          xcrun clang "${common_flags[@]}" -c MacKernelSDK/Library/kmod/cplus_start.c -o build-macksdk/cplus_start.o
+          xcrun clang "${common_flags[@]}" -c MacKernelSDK/Library/kmod/cplus_stop.c -o build-macksdk/cplus_stop.o
+          xcrun ar rcs MacKernelSDK/Library/x86_64/libkmod.a build-macksdk/c_start.o build-macksdk/c_stop.o
+          xcrun ar rcs MacKernelSDK/Library/universal/libkmodc++.a build-macksdk/cplus_start.o build-macksdk/cplus_stop.o
 
       - name: Build native legacy kext
         run: make FLAVOR=airport-legacy kext
