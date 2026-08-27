@@ -1,0 +1,256 @@
+diff --git a/drivers/net/wireless/realtek/rtw88/fw.c b/drivers/net/wireless/realtek/rtw88/fw.c
+index 4820705..c5444fc 100644
+--- a/drivers/net/wireless/realtek/rtw88/fw.c
++++ b/drivers/net/wireless/realtek/rtw88/fw.c
+@@ -719,6 +719,12 @@ void rtw_fw_send_rssi_info(struct rtw_dev *rtwdev, struct rtw_sta_info *si)
+ {
+ 	u8 h2c_pkt[H2C_PKT_SIZE] = {0};
+ 	u8 rssi = ewma_rssi_read(&si->avg_rssi);
++#ifdef RTW88_MACOS
++	/* exp23: use the value calibrated by the watchdog RSSI pass. */
++	if (si->macos_ra_calibrated_rssi)
++		rssi = si->macos_ra_calibrated_rssi;
++	si->macos_ra_fw_rssi = rssi;
++#endif
+ 	bool stbc_en = si->stbc_en ? true : false;
+ 
+ 	SET_H2C_CMD_ID_CLASS(h2c_pkt, H2C_CMD_RSSI_MONITOR);
+diff --git a/drivers/net/wireless/realtek/rtw88/main.c b/drivers/net/wireless/realtek/rtw88/main.c
+index 493b71e..5bb0d46 100644
+--- a/drivers/net/wireless/realtek/rtw88/main.c
++++ b/drivers/net/wireless/realtek/rtw88/main.c
+@@ -236,6 +236,7 @@ static void rtw_watch_dog_work(struct work_struct *work)
+ 	bool busy_traffic = test_bit(RTW_FLAG_BUSY_TRAFFIC, rtwdev->flags);
+ 	int received_beacons = rtwdev->dm_info.cur_pkt_count.num_bcn_pkt;
+ 	u32 tx_unicast_mbps, rx_unicast_mbps;
++	bool macos_high_load;
+ 	bool ps_active;
+ 
+ 	mutex_lock(&rtwdev->mutex);
+@@ -246,9 +247,13 @@ static void rtw_watch_dog_work(struct work_struct *work)
+ 	ieee80211_queue_delayed_work(rtwdev->hw, &rtwdev->watch_dog_work,
+ 				     RTW_WATCH_DOG_DELAY_TIME);
+ 
+-	/* Diagnostic: skip all RF-dynamic work + coex queries. */
+-	if (rtw88_disable_watchdog_work)
++	/* macOS: keep the potentially troublesome full RF-dynamic path disabled,
++	 * but retain the one piece firmware rate adaptation needs: fresh RSSI for
++	 * the associated STA.  This deliberately avoids DIG/DPK/power tracking. */
++	if (rtw88_disable_watchdog_work) {
++		rtwdev->watch_dog_cnt++;
+ 		goto unlock;
++	}
+ 
+ 	if (rtwdev->stats.tx_cnt > 100 || rtwdev->stats.rx_cnt > 100)
+ 		set_bit(RTW_FLAG_BUSY_TRAFFIC, rtwdev->flags);
+@@ -266,6 +271,10 @@ static void rtw_watch_dog_work(struct work_struct *work)
+ 
+ 	tx_unicast_mbps = stats->tx_unicast >> RTW_TP_SHIFT;
+ 	rx_unicast_mbps = stats->rx_unicast >> RTW_TP_SHIFT;
++	/* Keep the complete watchdog alive, but do not run the expensive RF/coex
++	 * control transactions in the middle of a saturated data burst.  Those
++	 * transactions contend with the BE DMA doorbell on this macOS port. */
++	macos_high_load = busy_traffic || tx_unicast_mbps >= 1 || rx_unicast_mbps >= 1;
+ 
+ 	ewma_tp_add(&stats->tx_ewma_tp, tx_unicast_mbps);
+ 	ewma_tp_add(&stats->rx_ewma_tp, rx_unicast_mbps);
+@@ -281,13 +290,17 @@ static void rtw_watch_dog_work(struct work_struct *work)
+ 	if (test_bit(RTW_FLAG_SCANNING, rtwdev->flags))
+ 		goto unlock;
+ 
+-	/* make sure BB/RF is working for dynamic mech */
+-	rtw_leave_lps(rtwdev);
+-	rtw_coex_wl_status_check(rtwdev);
+-	rtw_coex_query_bt_hid_list(rtwdev);
+-	rtw_coex_active_query_bt_info(rtwdev);
+-
+-	rtw_phy_dynamic_mechanism(rtwdev);
++	/* RSSI/RA remains serviced on every tick.  Defer only the heavyweight
++	 * coexistence and RF tracking work while traffic is flowing. */
++	if (macos_high_load) {
++		rtw_phy_macos_rssi_feed(rtwdev);
++	} else {
++		rtw_leave_lps(rtwdev);
++		rtw_coex_wl_status_check(rtwdev);
++		rtw_coex_query_bt_hid_list(rtwdev);
++		rtw_coex_active_query_bt_info(rtwdev);
++		rtw_phy_dynamic_mechanism(rtwdev);
++	}
+ 
+ 	rtw_hci_dynamic_rx_agg(rtwdev,
+ 			       tx_unicast_mbps >= 1 || rx_unicast_mbps >= 1);
+diff --git a/drivers/net/wireless/realtek/rtw88/main.h b/drivers/net/wireless/realtek/rtw88/main.h
+index 1ab7021..1ac880d 100644
+--- a/drivers/net/wireless/realtek/rtw88/main.h
++++ b/drivers/net/wireless/realtek/rtw88/main.h
+@@ -766,6 +766,11 @@ struct rtw_sta_info {
+ 
+ 	struct ewma_rssi avg_rssi;
+ 	u8 rssi_level;
++#ifdef RTW88_MACOS
++	u8 macos_ra_raw_rssi;
++	u8 macos_ra_calibrated_rssi;
++	u8 macos_ra_fw_rssi;
++#endif
+ 
+ 	u8 mac_id;
+ 	u8 rate_id;
+diff --git a/drivers/net/wireless/realtek/rtw88/pci.c b/drivers/net/wireless/realtek/rtw88/pci.c
+index 89aef8c..cb09fc0 100644
+--- a/drivers/net/wireless/realtek/rtw88/pci.c
++++ b/drivers/net/wireless/realtek/rtw88/pci.c
+@@ -1137,8 +1137,15 @@ static u32 rtw_pci_rx_napi(struct rtw_dev *rtwdev, struct rtw_pci *rtwpci,
+ 		rtw_pci_dma_check(rtwdev, ring, cur_rp);
+ 		skb = ring->buf[cur_rp];
+ 		dma = *((dma_addr_t *)skb->cb);
++#ifdef RTW88_MACOS
++		/* macOS uses a software bounce buffer. Copy only the RX descriptor
++		 * first so pkt_len can be decoded; copying the full 11K buffer for
++		 * every descriptor was the dominant downlink CPU/memory cost. */
++		dma_sync_single_for_cpu(rtwdev->dev, dma, pkt_desc_sz, DMA_FROM_DEVICE);
++#else
+ 		dma_sync_single_for_cpu(rtwdev->dev, dma, RTK_PCI_RX_BUF_SIZE,
+ 					DMA_FROM_DEVICE);
++#endif
+ 		rx_desc = skb->data;
+ 		rtw_rx_query_rx_desc(rtwdev, rx_desc, &pkt_stat, &rx_status);
+ 
+@@ -1150,6 +1157,16 @@ static u32 rtw_pci_rx_napi(struct rtw_dev *rtwdev, struct rtw_pci *rtwpci,
+ 		 * discard the frame if none available
+ 		 */
+ 		new_len = pkt_stat.pkt_len + pkt_offset;
++		if (unlikely(new_len > RTK_PCI_RX_BUF_SIZE))
++			goto next_rp;
++#ifdef RTW88_MACOS
++		/* Now that the descriptor told us the real frame length, copy only
++		 * bytes the driver will actually consume instead of all 11478 bytes.
++		 * The descriptor is copied twice, intentionally: it keeps the DMA shim
++		 * simple and the second copy is tiny relative to the old full-buffer
++		 * bounce copy. */
++		dma_sync_single_for_cpu(rtwdev->dev, dma, new_len, DMA_FROM_DEVICE);
++#endif
+ 		new = dev_alloc_skb(new_len);
+ 		if (WARN_ONCE(!new, "rx routine starvation\n"))
+ 			goto next_rp;
+diff --git a/drivers/net/wireless/realtek/rtw88/phy.c b/drivers/net/wireless/realtek/rtw88/phy.c
+index e2ac5c6..14718c6 100644
+--- a/drivers/net/wireless/realtek/rtw88/phy.c
++++ b/drivers/net/wireless/realtek/rtw88/phy.c
+@@ -322,6 +322,19 @@ static void rtw_phy_stat_rssi_iter(void *data, struct ieee80211_sta *sta)
+ 	u8 rssi;
+ 
+ 	rssi = ewma_rssi_read(&si->avg_rssi);
++#ifdef RTW88_MACOS
++	/* exp23: the corrected EWMA is deliberately preserved.  Calibrate only
++	 * the strong-signal RA input; exp12's broken EWMA accidentally provided
++	 * a similar positive bias, while weak links remain untouched. */
++	si->macos_ra_raw_rssi = rssi;
++	if (rssi >= 46)
++		si->macos_ra_calibrated_rssi = min_t(u8, rssi + 18, 100);
++	else if (rssi >= 38)
++		si->macos_ra_calibrated_rssi = min_t(u8, rssi + 8, 100);
++	else
++		si->macos_ra_calibrated_rssi = rssi;
++	rssi = si->macos_ra_calibrated_rssi;
++#endif
+ 	si->rssi_level = rtw_phy_get_rssi_level(si->rssi_level, rssi);
+ 
+ 	rtw_fw_send_rssi_info(rtwdev, si);
+@@ -342,6 +355,14 @@ static void rtw_phy_stat_rssi(struct rtw_dev *rtwdev)
+ 	dm_info->min_rssi = data.min_rssi;
+ }
+ 
++/* Feixiao/macOS minimal watchdog path: feed the firmware's rate-adaptation
++ * logic with per-station RSSI while leaving the rest of the dynamic PHY
++ * mechanism disabled. */
++void rtw_phy_macos_rssi_feed(struct rtw_dev *rtwdev)
++{
++	rtw_phy_stat_rssi(rtwdev);
++}
++
+ static void rtw_phy_stat_rate_cnt(struct rtw_dev *rtwdev)
+ {
+ 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+diff --git a/drivers/net/wireless/realtek/rtw88/phy.h b/drivers/net/wireless/realtek/rtw88/phy.h
+index 8449936..5fa105a 100644
+--- a/drivers/net/wireless/realtek/rtw88/phy.h
++++ b/drivers/net/wireless/realtek/rtw88/phy.h
+@@ -22,6 +22,7 @@ extern const u8 rtw_rate_size[];
+ 
+ void rtw_phy_init(struct rtw_dev *rtwdev);
+ void rtw_phy_dynamic_mechanism(struct rtw_dev *rtwdev);
++void rtw_phy_macos_rssi_feed(struct rtw_dev *rtwdev);
+ u8 rtw_phy_rf_power_2_rssi(s8 *rf_power, u8 path_num);
+ u32 rtw_phy_read_rf(struct rtw_dev *rtwdev, enum rtw_rf_path rf_path,
+ 		    u32 addr, u32 mask);
+diff --git a/drivers/net/wireless/realtek/rtw88/rtw8821c.c b/drivers/net/wireless/realtek/rtw88/rtw8821c.c
+index 2078b06..28dffae 100644
+--- a/drivers/net/wireless/realtek/rtw88/rtw8821c.c
++++ b/drivers/net/wireless/realtek/rtw88/rtw8821c.c
+@@ -674,7 +674,11 @@ static void query_phy_status(struct rtw_dev *rtwdev, u8 *phy_status,
+ 		query_phy_status_page1(rtwdev, phy_status, pkt_stat);
+ 		break;
+ 	default:
+-		rtw_warn(rtwdev, "unused phy status page (%d)\n", page);
++		/* The 8821C firmware can emit vendor PHY pages that this driver does
++		 * not consume.  This is expected traffic, not a recovery condition;
++		 * logging it at WARN for every RX frame needlessly wakes the CPU and
++		 * floods the kernel log (especially on battery). */
++		rtw_dbg(rtwdev, "unused phy status page (%d)\n", page);
+ 		return;
+ 	}
+ }
+diff --git a/drivers/net/wireless/realtek/rtw88/tx.c b/drivers/net/wireless/realtek/rtw88/tx.c
+index 2ab440c..8da4d90 100644
+--- a/drivers/net/wireless/realtek/rtw88/tx.c
++++ b/drivers/net/wireless/realtek/rtw88/tx.c
+@@ -396,7 +396,18 @@ static void rtw_tx_data_pkt_info_update(struct rtw_dev *rtwdev,
+ 		pkt_info->rate = fix_rate;
+ 		pkt_info->dis_rate_fallback = true;
+ 		pkt_info->use_rate = true;
++		/* A forced legacy bootstrap rate must use a matching legacy
++		 * descriptor.  Keeping the station's VHT rate-id/80 MHz width
++		 * with a 6 Mbps rate produces an invalid protected data frame that
++		 * strict WPA2 APs silently discard (DHCP then never gets an OFFER). */
++		if (fix_rate <= DESC_RATE54M) {
++			pkt_info->rate_id = RTW_RATEID_G;
++			pkt_info->bw = RTW_CHANNEL_WIDTH_20;
++			pkt_info->stbc = false;
++			pkt_info->ldpc = false;
++			pkt_info->ampdu_en = false;
++		}
+ 	}
+ }
+ 
+ void rtw_tx_pkt_info_update(struct rtw_dev *rtwdev,
+@@ -554,12 +565,13 @@ void rtw_tx(struct rtw_dev *rtwdev,
+ 	int ret;
+ 
+ 	rtw_tx_pkt_info_update(rtwdev, &pkt_info, control->sta, skb);
++	/* exp8: snapshot the exact packet-info fields handed to HCI. */
++	rtw88_exp7_tx_diag_record(&pkt_info);
+ 	ret = rtw_hci_tx_write(rtwdev, &pkt_info, skb);
+ 	if (ret) {
+ 		rtw_err(rtwdev, "failed to write TX skb to HCI\n");
+ 		goto out;
+ 	}
+-
+ 	rtw_hci_tx_kick_off(rtwdev);
+ 
+ 	return;
+@@ -568,6 +580,15 @@ void rtw_tx(struct rtw_dev *rtwdev,
+ 	ieee80211_free_txskb(rtwdev->hw, skb);
+ }
+ 
++#ifdef RTW88_MACOS
++void rtw88_macos_tx_kick(struct rtw_dev *rtwdev)
++{
++	if (rtwdev)
++		rtw_hci_tx_kick_off(rtwdev);
++}
++#endif
++
++
+ static void rtw_txq_check_agg(struct rtw_dev *rtwdev,
+ 			      struct rtw_txq *rtwtxq,
+ 			      struct sk_buff *skb)

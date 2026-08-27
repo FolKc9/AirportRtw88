@@ -18,7 +18,12 @@ jobs:
           path: AirportRtw88
 
       - name: Clone rtw88-stable
-        run: git clone --depth 1 https://github.com/thegwchr/rtw88-stable.git
+        run: |
+          git clone --branch feixiao https://github.com/thegwchr/rtw88-stable.git
+          git -C rtw88-stable checkout d029a677c49266fad86750714eb5612becd134d3
+
+      - name: Apply the exp40 macOS port patches
+        run: git -C rtw88-stable apply --check ../AirportRtw88/patches/rtw88-exp40-macos-port.patch && git -C rtw88-stable apply ../AirportRtw88/patches/rtw88-exp40-macos-port.patch
 
       - name: Download firmware blobs
         run: |
