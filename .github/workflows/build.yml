@@ -2,7 +2,7 @@ name: Build AirportRtw88Legacy
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, exp44-uplink-all-fixes ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -24,6 +24,9 @@ jobs:
 
       - name: Apply the exp40 macOS port patches
         run: git -C rtw88-stable apply --check ../AirportRtw88/patches/rtw88-exp40-macos-port.patch && git -C rtw88-stable apply ../AirportRtw88/patches/rtw88-exp40-macos-port.patch
+
+      - name: Apply integrated exp44 uplink fixes
+        run: python3 AirportRtw88/scripts/apply_exp44_uplink_all.py AirportRtw88 rtw88-stable
 
       - name: Download firmware blobs
         run: |
@@ -54,16 +57,16 @@ jobs:
       - name: Get git hash and kext UUID
         id: ids
         run: |
-          echo "hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "hash=$(git -C AirportRtw88 rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "uuid=$(dwarfdump --uuid AirportRtw88/build-airport-legacy/out/AirportRtw88Legacy.kext/Contents/MacOS/AirportRtw88Legacy | awk '{print $2}')" >> $GITHUB_OUTPUT
 
       - name: Create artifact zip
         run: |
           cd AirportRtw88/build-airport-legacy/out
-          zip -r "${{ runner.temp }}/AirportRtw88Legacy_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip" AirportRtw88Legacy.kext
+          zip -r "${{ runner.temp }}/AirportRtw88Legacy_exp44_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip" AirportRtw88Legacy.kext
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AirportRtw88Legacy_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}
-          path: ${{ runner.temp }}/AirportRtw88Legacy_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip
+          name: AirportRtw88Legacy_exp44_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}
+          path: ${{ runner.temp }}/AirportRtw88Legacy_exp44_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip
