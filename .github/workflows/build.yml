@@ -25,8 +25,8 @@ jobs:
       - name: Apply the exp40 macOS port patches
         run: git -C rtw88-stable apply --check ../AirportRtw88/patches/rtw88-exp40-macos-port.patch && git -C rtw88-stable apply ../AirportRtw88/patches/rtw88-exp40-macos-port.patch
 
-      - name: Apply exp44b safe uplink fixes
-        run: python3 AirportRtw88/scripts/apply_exp44b_uplink_safe.py AirportRtw88 rtw88-stable
+      - name: Apply integrated exp44 safe uplink fixes
+        run: python3 AirportRtw88/scripts/apply_exp44_uplink_all.py AirportRtw88 rtw88-stable
 
       - name: Download firmware blobs
         run: |
@@ -63,10 +63,10 @@ jobs:
       - name: Create artifact zip
         run: |
           cd AirportRtw88/build-airport-legacy/out
-          zip -r "${{ runner.temp }}/AirportRtw88Legacy_exp44b_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip" AirportRtw88Legacy.kext
+          zip -r "${{ runner.temp }}/AirportRtw88Legacy_exp44_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip" AirportRtw88Legacy.kext
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AirportRtw88Legacy_exp44b_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}
-          path: ${{ runner.temp }}/AirportRtw88Legacy_exp44b_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip
+          name: AirportRtw88Legacy_exp44_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}
+          path: ${{ runner.temp }}/AirportRtw88Legacy_exp44_${{ steps.ids.outputs.hash }}_${{ steps.ids.outputs.uuid }}.zip
