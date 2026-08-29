@@ -1,14 +1,20 @@
 # EXP44 — Uplink All Fixes
 
-Single integrated test build based on EXP40.
+Single integrated uplink test build based on the working EXP40 AirPort lifecycle.
 
-Includes:
-- release the temporary 6 Mbps TX bootstrap after the link becomes connected;
-- keep firmware rate adaptation enabled after channel restore;
-- correct IO80211 pull-model backpressure before dequeue;
-- stop servicing the inactive legacy output queue on TX reclaim;
-- restore actual host-deferred A-MPDU doorbell batching;
-- retry uplink ADDBA while connected until BlockAck is established;
-- publish a VHT-capable link medium instead of the legacy 54 Mbps placeholder.
+The EXP40 behavior for native macOS integration is intentionally preserved:
+- APPLE80211 power handling;
+- enable/disable lifecycle;
+- AirPort attach and link-state notifications;
+- existing medium dictionary;
+- existing TX queue resume path.
 
-EXP40/main remains untouched as the rollback baseline.
+Uplink fixes applied on top:
+- release the temporary 6 Mbps TX bootstrap after the link becomes fully connected;
+- keep firmware rate adaptation enabled after connected-channel restore;
+- check BE-ring resources before dequeuing an IO80211 output packet;
+- restore actual host-deferred A-MPDU doorbell batching for aggregation-eligible data;
+- keep management, EAPOL and pre-BlockAck traffic immediate;
+- retry uplink ADDBA while connected until TX BlockAck is established.
+
+The branch `exp44-uplink-all-fixes` is the canonical EXP44 implementation. `main`/EXP40 remains untouched as the rollback baseline.
